@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>糖尿病出院患者智能随访助手</title>
+  <style>
+    :root {
+      --primary:#2563eb; --primary-600:#1d4ed8; --primary-700:#1e40af;
+      --accent:#0ea5e9; --teal:#14b8a6;
+      --bg:#f4f7fb; --card:#ffffff;
+      --text:#0f172a; --muted:#64748b; --faint:#94a3b8;
+      --border:#e2e8f0; --soft:#f1f5f9;
+      --ok:#10b981; --warn:#f59e0b; --danger:#ef4444;
+      --radius:16px;
+      --shadow-sm:0 1px 2px rgba(15,23,42,.06);
+      --shadow:0 10px 30px -18px rgba(15,23,42,.35);
+    }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    html, body { height:100%; }
+    body {
+      font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",Segoe UI,sans-serif;
+      background:
+        radial-gradient(1100px 460px at 12% -12%, #e0ecff 0%, transparent 60%),
+        radial-gradient(900px 420px at 100% 0%, #d9f6f1 0%, transparent 55%),
+        var(--bg);
+      background-attachment:fixed;
+      color:var(--text);
+      -webkit-font-smoothing:antialiased;
+      line-height:1.5;
+    }
+    ::selection { background:#bfdbfe; }
+
+    /* ── 顶栏 ── */
+    header {
+      background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 45%,#0ea5e9 100%);
+      color:#fff; padding:26px 28px;
+      box-shadow:0 12px 30px -18px rgba(37,99,235,.9);
+      position:relative; overflow:hidden;
+    }
+    header::after {
+      content:""; position:absolute; right:-60px; top:-60px; width:240px; height:240px;
+      background:radial-gradient(circle, rgba(255,255,255,.22) 0%, transparent 70%);
+      border-radius:50%;
+    }
+    .brand { display:flex; align-items:center; gap:15px; max-width:1180px; margin:0 auto; position:relative; z-index:1; }
+    .brand-mark {
+      width:46px; height:46px; flex:0 0 46px; border-radius:13px;
+      background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.28);
+      display:flex; align-items:center; justify-content:center;
+      backdrop-filter:blur(4px);
+    }
+    .brand-mark svg { width:26px; height:26px; }
+    header h1 { font-size:20px; font-weight:650; letter-spacing:.2px; }
+    header p { font-size:12.5px; opacity:.9; margin-top:3px; }
+
+    /* ── 布局 ── */
+    .layout {
+      display:flex; gap:20px; padding:22px; max-width:1180px; margin:0 auto;
+      align-items:flex-start;
+    }
+    .main { flex:1.62; min-width:0; }
+    .side { flex:1; min-width:0; }
+
+    .panel {
+      background:var(--card); border-radius:var(--radius); padding:22px;
+      box-shadow:var(--shadow); border:1px solid rgba(226,232,240,.9);
+    }
+    .panel-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; gap:10px; }
+    .panel-head h2 { font-size:15.5px; font-weight:650; display:flex; align-items:center; gap:9px; }
+    .panel-head h2::before {
+      content:""; width:5px; height:17px; border-radius:3px;
+      background:linear-gradient(180deg,var(--primary),var(--accent));
+    }
+    .panel-sub { font-size:12px; color:var(--faint); }
+
+    /* ── 分段标签 ── */
+    .tabs {
+      display:flex; gap:4px; margin-bottom:18px; padding:4px;
+      background:var(--soft); border-radius:13px; border:1px solid var(--border);
+    }
+    .tab {
+      flex:1; text-align:center; padding:10px 8px; border-radius:10px; cursor:pointer;
+      font-weight:600; font-size:13.5px; color:var(--muted);
+      transition:all .18s ease; user-select:none; white-space:nowrap;
+    }
+    .tab:hover { color:var(--primary); }
+    .tab.active {
+      background:#fff; color:var(--primary-700);
+      box-shadow:var(--shadow-sm);
+    }
+
+    /* ── 表单 ── */
+    label { display:block; font-size:13px; margin:14px 0 6px; color:#475569; font-weight:500; }
+    label:first-child { margin-top:0; }
+    input, select, textarea {
+      width:100%; padding:11px 12px; border:1px solid var(--border); border-radius:10px;
+      font-size:14px; font-family:inherit; color:var(--text); background:#fff;
+      transition:border-color .15s ease, box-shadow .15s ease;
+    }
+    input::placeholder, textarea::placeholder { color:var(--faint); }
+    input:focus, select:focus, textarea:focus {
+      outline:none; border-color:var(--primary);
+      box-shadow:0 0 0 4px rgba(37,99,235,.13);
+    }
+    textarea { resize:vertical; line-height:1.6; }
+    select { cursor:pointer; appearance:none;
+      background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+      background-repeat:no-repeat; background-position:right 13px center; padding-right:34px;
+    }
+    input[type=file] { padding:9px; border-style:dashed; cursor:pointer; }
+
+    button {
+      width:100%; background:linear-gradient(135deg,var(--primary),var(--primary-600));
+      color:#fff; border:0; padding:11px 18px; border-radius:10px; font-size:14px;
+      font-weight:600; cursor:pointer; font-family:inherit;
+      transition:transform .15s ease, box-shadow .15s ease, filter .15s ease;
+      box-shadow:0 6px 16px -10px rgba(37,99,235,.95);
+    }
+    button:hover { filter:brightness(1.05); transform:translateY(-1px); box-shadow:0 10px 22px -12px rgba(37,99,235,1); }
+    button:active { transform:translateY(0); }
+    button:disabled { opacity:.55; cursor:not-allowed; transform:none; }
+    button.secondary {
+      background:#fff; color:#334155; border:1px solid var(--border);
+      box-shadow:var(--shadow-sm); margin-top:10px;
+    }
+    button.secondary:hover { border-color:#cbd5e1; color:var(--primary); filter:none; }
+    button.danger { background:linear-gradient(135deg,#f43f5e,#ef4444); box-shadow:0 6px 16px -10px rgba(239,68,68,.95); }
+
+    /* ── 认证区 ── */
+    .auth-box {
+      border:1px solid var(--border); border-radius:14px; padding:18px;
+      background:linear-gradient(180deg,#fbfdff,#f6f9fe);
+    }
+    .auth-tabs { display:flex; gap:6px; margin-bottom:16px; border-bottom:1px solid var(--border); }
+    .atab {
+      flex:1; text-align:center; padding:10px 8px; cursor:pointer; font-size:14px; font-weight:600;
+      color:var(--muted); border-bottom:2px solid transparent; margin-bottom:-1px;
+      transition:all .15s ease; user-select:none;
+    }
+    .atab:hover { color:var(--primary); }
+    .atab.active { color:var(--primary); border-bottom-color:var(--primary); }
+    .auth-box input { margin-top:10px; }
+    .auth-box button { margin-top:16px; }
+    .hint { font-size:12px; color:var(--faint); margin-top:12px; line-height:1.6; }
+
+    /* ── 结果 / 消息 ── */
+    .msg {
+      margin-top:16px; padding:14px 16px; border-radius:12px; font-size:14px;
+      line-height:1.75; white-space:pre-wrap; word-break:break-word;
+      background:#f8fafc; border:1px solid var(--border); border-left:4px solid var(--primary);
+    }
+    .msg:empty { display:none; }
+
+    .tag {
+      display:inline-block; padding:2.5px 9px; border-radius:999px; font-size:11.5px;
+      font-weight:600; color:#fff; margin-right:7px; vertical-align:middle;
+      letter-spacing:.2px; white-space:nowrap;
+    }
+    .tag.ok { background:var(--ok); } .tag.warn { background:var(--warn); }
+    .tag.danger { background:var(--danger); } .tag.info { background:var(--primary); }
+
+    /* ── 待处理 / 文档卡片 ── */
+    .pending-item {
+      border:1px solid var(--border); border-radius:13px; padding:14px; margin-bottom:11px;
+      background:#fff; box-shadow:var(--shadow-sm); transition:box-shadow .15s ease, border-color .15s ease;
+    }
+    .pending-item:hover { box-shadow:var(--shadow); border-color:#dbe4f0; }
+    .pending-item .q {
+      font-weight:600; font-size:13.8px; margin-bottom:8px; line-height:1.6;
+      padding-left:11px; border-left:3px solid var(--accent);
+    }
+    .pending-item textarea { margin-bottom:9px; }
+    .pending-item button { margin-top:2px; }
+
+    .who {
+      display:inline-flex; align-items:center; gap:8px; font-size:13px; color:var(--primary-700);
+      background:#eff5ff; border:1px solid #dbe7ff; padding:7px 13px; border-radius:999px;
+      font-weight:600; margin-bottom:16px;
+    }
+    .who::before {
+      content:""; width:8px; height:8px; border-radius:50%; background:var(--ok);
+      box-shadow:0 0 0 3px rgba(16,185,129,.18);
+    }
+    .muted { color:var(--muted); font-size:12.5px; line-height:1.7; }
+
+    /* 空状态占位 */
+    #pending-list.muted, #doc-list.muted {
+      display:block; padding:22px 16px; text-align:center;
+      border:1px dashed var(--border); border-radius:12px; background:#fafcff;
+    }
+
+    .sep { height:1px; background:var(--border); margin:20px 0; border:0; }
+
+    /* ── 人工模式（医生接管）── */
+    .human-banner {
+      background:#eff5ff; border:1px solid #dbe7ff; border-radius:12px;
+      padding:12px 14px; margin-bottom:14px;
+    }
+    .human-banner .hb-title {
+      font-weight:650; font-size:13.5px; color:var(--primary-700);
+      display:flex; align-items:center; gap:8px;
+    }
+    .human-banner .hb-title::before {
+      content:""; width:8px; height:8px; border-radius:50%; background:var(--ok);
+      box-shadow:0 0 0 3px rgba(16,185,129,.18);
+    }
+    .human-banner .hb-sub { font-size:12px; color:var(--muted); margin-top:4px; line-height:1.6; }
+
+    .convo { display:flex; flex-direction:column; gap:9px; margin:10px 0 4px; max-height:320px; overflow:auto; }
+    .bubble {
+      max-width:84%; padding:9px 12px; border-radius:12px; font-size:13.5px;
+      line-height:1.65; white-space:pre-wrap; word-break:break-word;
+    }
+    .bubble .who-tag { font-size:11px; opacity:.75; display:block; margin-bottom:2px; }
+    .bubble.patient { align-self:flex-end; background:var(--primary); color:#fff; border-bottom-right-radius:4px; }
+    .bubble.doctor {
+      align-self:flex-start; background:#f1f5f9; color:var(--text);
+      border:1px solid var(--border); border-bottom-left-radius:4px;
+    }
+
+    /* ── 聊天流 ── */
+    .chat-box {
+      display:flex; flex-direction:column; gap:10px; padding:14px;
+      background:#f8fafc; border:1px solid var(--border); border-radius:14px;
+      min-height:300px; max-height:440px; overflow-y:auto;
+    }
+    .chat-input { display:flex; gap:8px; margin-top:10px; align-items:flex-end; }
+    .chat-input textarea { flex:1; margin:0; }
+    .chat-input button { width:auto; flex:0 0 auto; padding:11px 22px; margin:0; }
+    .bubble.assistant {
+      align-self:flex-start; background:#fff; color:var(--text);
+      border:1px solid var(--border); border-bottom-left-radius:4px;
+    }
+    .bubble.doctor {
+      align-self:flex-start; background:#e8f7ef; color:var(--text);
+      border:1px solid #c9ebd9; border-bottom-left-radius:4px;
+    }
+    .bubble.system {
+      align-self:center; max-width:100%; background:transparent; border:0;
+      color:var(--muted); font-size:12px; padding:0; text-align:center;
+    }
+    .msg-text { white-space:pre-wrap; }
+
+    .chips { display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 10px; }
+    .chip {
+      padding:6px 13px; border-radius:999px; background:#eef2f8; border:1px solid var(--border);
+      font-size:12.5px; font-weight:600; color:var(--muted); cursor:pointer; user-select:none;
+      transition:all .15s ease;
+    }
+    .chip:hover { color:var(--primary); }
+    .chip.active { background:var(--primary); border-color:var(--primary); color:#fff; }
+
+    /* ── 响应式 ── */
+    @media (max-width:980px) {
+      .layout { flex-direction:column; padding:14px; gap:14px; }
+      .main, .side { flex:1 1 auto; width:100%; }
+      header { padding:20px; }
+      header h1 { font-size:17px; }
+      .brand-mark { width:40px; height:40px; flex-basis:40px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20.8 5.6a5.4 5.4 0 0 0-7.6 0L12 6.8l-1.2-1.2a5.4 5.4 0 1 0-7.6 7.6L12 21.6l8.8-8.4a5.4 5.4 0 0 0 0-7.6z"/>
+          <path d="M3.6 13.4h3.6l1.5-2.6 2.1 4.4 1.6-3 1.3 1.2h3.7" stroke-width="1.6"/>
+        </svg>
+      </div>
+      <div>
+        <h1>糖尿病出院患者智能随访助手</h1>
+        <p>用户显式选择入口 → 双 Agent（问答 RAG + 人工介入 · 血糖管理确定性计算）</p>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- 患者端 -->
+    <div class="panel main">
+      <div class="panel-head">
+        <h2>患者端</h2>
+        <span class="panel-sub">咨询 · 血糖 · 病历</span>
+      </div>
+
+      <!-- 认证区 -->
+      <div class="auth-box" id="patient-auth">
+        <div class="auth-tabs">
+          <span class="atab active" data-auth="login" onclick="switchAuth('patient','login')">登录</span>
+          <span class="atab" data-auth="register" onclick="switchAuth('patient','register')">注册</span>
+        </div>
+        <div id="patient-login">
+          <input id="p-account" placeholder="账号" />
+          <input id="p-password" type="password" placeholder="密码" />
+          <button onclick="patientLogin()">登录</button>
+        </div>
+        <div id="patient-register" style="display:none">
+          <input id="p-r-account" placeholder="账号" />
+          <input id="p-r-password" type="password" placeholder="密码（至少 6 位）" />
+          <input id="p-r-name" placeholder="姓名（可选）" />
+          <button onclick="patientRegister()">注册并登录</button>
+        </div>
+        <div class="hint">演示账号：patient_001 / 123456（也可注册新患者）</div>
+      </div>
+
+      <!-- 登录后工作区 -->
+      <div id="patient-workspace" style="display:none">
+        <div class="who" id="patient-who"></div>
+
+        <!-- 人工模式：医生接管后展示 -->
+        <div class="human-banner" id="human-banner" style="display:none">
+          <div class="hb-title" id="human-banner-title">医生已接管，正在为您服务</div>
+          <div class="hb-sub" id="human-banner-sub">您的咨询消息将直接发送给医生；医生结束诊断后会自动恢复智能助手。</div>
+        </div>
+
+        <div class="tabs">
+          <div class="tab active" data-mode="qa" onclick="switchTab('qa')">我要咨询</div>
+          <div class="tab" data-mode="glucose" onclick="switchTab('glucose')">记录血糖</div>
+          <div class="tab" data-mode="docs" onclick="switchTab('docs')">我的病历</div>
+        </div>
+
+        <div id="tab-qa">
+          <div id="chat-box" class="chat-box"></div>
+          <label style="display:flex;align-items:center;gap:8px;font-weight:400;font-size:12.5px;margin-top:12px;color:#64748b">
+            <input type="checkbox" id="qa-unified" style="width:16px;height:16px;flex:0 0 16px;accent-color:var(--primary);margin:0" />
+            智能路由（自动判断该走咨询还是血糖记录）
+          </label>
+          <div class="chat-input">
+            <textarea id="qa-question" rows="1" placeholder="输入您的问题，回车或点「发送」…"></textarea>
+            <button onclick="sendChat()">发送</button>
+          </div>
+        </div>
+
+        <div id="tab-glucose" style="display:none">
+          <label>血糖值 (mmol/L)</label>
+          <input id="glu-value" type="number" step="0.1" value="6.8" />
+          <label>测量类型</label>
+          <select id="glu-type">
+            <option>空腹</option><option>餐后</option><option>睡前</option><option>随机</option>
+          </select>
+          <button onclick="sendGlucose()">提交血糖</button>
+          <div class="msg" id="glu-result"></div>
+        </div>
+
+        <div id="tab-docs" style="display:none">
+          <label>文档类型</label>
+          <select id="doc-type">
+            <option value="discharge_summary">出院小结</option>
+            <option value="case_record">病例</option>
+          </select>
+          <label>标题（可选）</label>
+          <input id="doc-title" placeholder="如：2024-03 出院小结" />
+          <label>上传文件（PDF / Word / TXT / Markdown）</label>
+          <input id="doc-file" type="file" accept=".pdf,.docx,.txt,.md,.markdown" />
+          <div class="hint">或直接粘贴文本（文件保留为空时使用）：</div>
+          <textarea id="doc-text" rows="4" placeholder="粘贴病例或出院小结的文本内容"></textarea>
+          <button onclick="uploadDoc()">上传</button>
+          <div class="msg" id="doc-result"></div>
+
+          <hr class="sep" />
+          <div class="panel-head" style="margin-bottom:12px">
+            <h2>已上传文档</h2>
+          </div>
+          <button class="secondary" onclick="loadDocs()">刷新列表</button>
+          <div id="doc-list" class="muted" style="margin-top:12px">点击「刷新列表」查看已上传文档。</div>
+        </div>
+
+        <button class="secondary" onclick="patientLogout()">退出登录</button>
+      </div>
+    </div>
+
+    <!-- 医生端 -->
+    <div class="panel side">
+      <div class="panel-head">
+        <h2>医生端</h2>
+        <span class="panel-sub">待人工介入</span>
+      </div>
+
+      <div class="auth-box" id="doctor-auth">
+        <div class="auth-tabs">
+          <span class="atab active" data-auth="login" onclick="switchAuth('doctor','login')">登录</span>
+          <span class="atab" data-auth="register" onclick="switchAuth('doctor','register')">注册</span>
+        </div>
+        <div id="doctor-login">
+          <input id="d-account" placeholder="账号" />
+          <input id="d-password" type="password" placeholder="密码" />
+          <button onclick="doctorLogin()">登录</button>
+        </div>
+        <div id="doctor-register" style="display:none">
+          <input id="d-r-account" placeholder="账号" />
+          <input id="d-r-password" type="password" placeholder="密码（至少 6 位）" />
+          <input id="d-r-name" placeholder="姓名（可选）" />
+          <button onclick="doctorRegister()">注册并登录</button>
+        </div>
+        <div class="hint">演示账号：doctor_001 / 123456（注册即为医生）</div>
+      </div>
+
+      <div id="doctor-workspace" style="display:none">
+        <div class="who" id="doctor-who"></div>
+
+        <div class="panel-head" style="margin-bottom:10px"><h2>待人工介入</h2></div>
+        <div id="pending-list" class="muted">登录后可查看待人工介入的问答。</div>
+
+        <hr class="sep" />
+
+        <div class="panel-head" style="margin-bottom:8px"><h2>进行中的会话</h2></div>
+        <div id="session-chips" class="chips"><span class="muted">当前无进行中的会话</span></div>
+        <div id="doctor-convo" class="chat-box" style="min-height:200px;max-height:320px"></div>
+        <div id="doctor-reply-box" style="display:none">
+          <textarea id="doctor-reply" rows="2" placeholder="回复患者…"></textarea>
+          <button onclick="sessionReply()">回复患者</button>
+          <button class="danger" onclick="closeSession()">结束诊断</button>
+        </div>
+
+        <button class="secondary" onclick="refreshPending(); refreshSessions()">刷新</button>
+        <button class="danger" onclick="doctorLogout()">退出登录</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = ""; // 同源
+
+    // ── 登录态（存 localStorage，刷新不丢）──
+    let patientToken = localStorage.getItem('patient_token') || null;
+    let doctorToken  = localStorage.getItem('doctor_token')  || null;
+    let patientId    = localStorage.getItem('patient_id')    || '';
+    let doctorId     = localStorage.getItem('doctor_id')     || '';
+
+    function authHeader(token) {
+      return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
+    }
+
+    function switchAuth(panel, mode) {
+      document.querySelectorAll('#' + panel + '-auth .atab').forEach(t => t.classList.toggle('active', t.dataset.auth === mode));
+      document.getElementById(panel + '-login').style.display = mode === 'login' ? '' : 'none';
+      document.getElementById(panel + '-register').style.display = mode === 'register' ? '' : 'none';
+    }
+
+    function switchTab(mode) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.mode === mode));
+      document.getElementById('tab-qa').style.display = mode === 'qa' ? '' : 'none';
+      document.getElementById('tab-glucose').style.display = mode === 'glucose' ? '' : 'none';
+      document.getElementById('tab-docs').style.display = mode === 'docs' ? '' : 'none';
+      if (mode === 'docs') loadDocs();
+    }
+
+    function tag(type, text) { return `<span class="tag ${type}">${text}</span>`; }
+
+    // ── 通用：HTML 转义 + 对话气泡 ──
+    function escapeHtml(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    // ── 患者端对话气泡：role = patient / assistant / doctor / system ──
+    function addMsg(role, text) {
+      const box = document.getElementById('chat-box');
+      const el = document.createElement('div');
+      if (role === 'system') {
+        el.className = 'bubble system';
+        el.textContent = text;
+      } else {
+        const label = role === 'patient' ? '您' : (role === 'doctor' ? '医生' : '智能助手');
+        el.className = 'bubble ' + role;
+        el.innerHTML = `<span class="who-tag">${label}</span><span class="msg-text"></span>`;
+        el.querySelector('.msg-text').textContent = text;
+      }
+      box.appendChild(el);
+      box.scrollTop = box.scrollHeight;
+      return el;
+    }
+    function updateMsg(el, text) {
+      const t = el && el.querySelector('.msg-text');
+      if (!t) return;
+      t.textContent = text;
+      const box = document.getElementById('chat-box');
+      if (box) box.scrollTop = box.scrollHeight;
+    }
+
+    // 医生端对话气泡：患者消息标「患者」，医生消息标「医生」
+    function bubbleHtmlDoc(m) {
+      const isDoc = m.role === 'doctor';
+      return `<div class="bubble ${isDoc ? 'doctor' : 'patient'}">`
+        + `<span class="who-tag">${isDoc ? '医生' : '患者'}</span>${escapeHtml(m.content)}</div>`;
+    }
+
+    // 列表重绘前保存 / 重绘后恢复 textarea 草稿，避免轮询打断医生输入
+    function collectDrafts(root) {
+      const m = {};
+      root.querySelectorAll('textarea').forEach(t => { if (t.id) m[t.id] = t.value; });
+      return m;
+    }
+    function applyDrafts(root, m) {
+      root.querySelectorAll('textarea').forEach(t => { if (t.id && m[t.id]) t.value = m[t.id]; });
+    }
+
+    // ── 人工模式：患者端轮询（接收医生回复 / 感知结束恢复 AI）──
+    let humanPolling = null;
+    let humanWasActive = false;
+    let lastDoctorMsgId = 0;
+    let awaitingHuman = false;
+
+    function startHumanPolling() { pollHumanSession(); }
+
+    async function pollHumanSession() {
+      if (!patientToken) return;
+      try {
+        const resp = await fetch(API + '/api/v1/hitl/session/me', { headers: authHeader(patientToken) });
+        if (!resp.ok) return;
+        renderHumanState(await resp.json());
+      } catch (e) { /* 网络抖动忽略 */ }
+    }
+
+    function renderHumanState(d) {
+      const banner = document.getElementById('human-banner');
+      if (d.active) {
+        if (!humanWasActive) { addMsg('system', '医生已接管本次咨询，以下消息由医生回复'); humanWasActive = true; }
+        document.getElementById('human-banner-title').textContent = '医生已接管，正在为您服务';
+        document.getElementById('human-banner-sub').textContent = '您的咨询消息将直接发送给医生；医生结束诊断后会自动恢复智能助手。';
+        banner.style.display = '';
+        // 只追加「新」的医生消息，避免重复
+        (d.messages || []).forEach(m => {
+          if (m.role === 'doctor' && m.id > lastDoctorMsgId) {
+            lastDoctorMsgId = m.id;
+            addMsg('doctor', m.content);
+          }
+        });
+        if (!humanPolling) humanPolling = setInterval(pollHumanSession, 4000);
+      } else if (awaitingHuman && d.status !== 'closed') {
+        // 已转人工但医生尚未接入：保持轮询，等待接管
+        document.getElementById('human-banner-title').textContent = '已转人工，等待医生接入…';
+        document.getElementById('human-banner-sub').textContent = '医生接入后，您的消息将直接发送给医生。';
+        banner.style.display = '';
+        if (!humanPolling) humanPolling = setInterval(pollHumanSession, 4000);
+      } else {
+        banner.style.display = 'none';
+        if (humanWasActive && d.status === 'closed') {
+          addMsg('system', '医生已结束本次诊断，已恢复智能助手');
+        }
+        humanWasActive = false;
+        awaitingHuman = false;
+        if (humanPolling) { clearInterval(humanPolling); humanPolling = null; }
+      }
+    }
+
+    // ── 状态渲染：登录后显示工作区，隐藏认证框 ──
+    function renderPatientState() {
+      const logged = !!patientToken;
+      document.getElementById('patient-auth').style.display = logged ? 'none' : '';
+      document.getElementById('patient-workspace').style.display = logged ? '' : 'none';
+      if (logged) {
+        document.getElementById('patient-who').innerHTML = '当前患者：<b>' + patientId + '</b>';
+        switchTab('qa');
+        pollHumanSession();   // 刷新页面后恢复人工模式状态
+      }
+    }
+
+    function renderDoctorState() {
+      const logged = !!doctorToken;
+      document.getElementById('doctor-auth').style.display = logged ? 'none' : '';
+      document.getElementById('doctor-workspace').style.display = logged ? '' : 'none';
+      if (logged) {
+        document.getElementById('doctor-who').innerHTML = '当前医生：<b>' + doctorId + '</b>';
+        refreshPending();
+        refreshSessions();
+        if (!window.__doctorTimer) {
+          window.__doctorTimer = setInterval(() => { refreshPending(); refreshSessions(); }, 5000);
+        }
+      } else {
+        if (window.__doctorTimer) { clearInterval(window.__doctorTimer); window.__doctorTimer = null; }
+      }
+    }
+
+    // ── 患者：登录 / 注册 ──
+    async function patientLogin() {
+      const account = document.getElementById('p-account').value.trim();
+      const password = document.getElementById('p-password').value;
+      if (!account || !password) return alert('请输入账号和密码');
+      const ok = await doLogin(account, password, 'patient');
+      if (ok) { document.getElementById('p-password').value = ''; }
+    }
+
+    async function patientRegister() {
+      const account = document.getElementById('p-r-account').value.trim();
+      const password = document.getElementById('p-r-password').value;
+      const name = document.getElementById('p-r-name').value.trim();
+      if (!account) return alert('请输入账号');
+      if (password.length < 6) return alert('密码至少 6 位');
+      const ok = await doRegister(account, password, name, 'patient');
+      if (ok) {
+        document.getElementById('p-r-account').value = '';
+        document.getElementById('p-r-password').value = '';
+        document.getElementById('p-r-name').value = '';
+      }
+    }
+
+    function patientLogout() {
+      patientToken = null; patientId = '';
+      localStorage.removeItem('patient_token');
+      localStorage.removeItem('patient_id');
+      document.getElementById('qa-question').value = '';
+      document.getElementById('glu-result').innerHTML = '';
+      document.getElementById('chat-box').innerHTML = '';
+      // 重置人工模式界面与轮询
+      humanWasActive = false;
+      awaitingHuman = false;
+      lastDoctorMsgId = 0;
+      if (humanPolling) { clearInterval(humanPolling); humanPolling = null; }
+      document.getElementById('human-banner').style.display = 'none';
+      renderPatientState();
+    }
+
+    // ── 医生：登录 / 注册 ──
+    async function doctorLogin() {
+      const account = document.getElementById('d-account').value.trim();
+      const password = document.getElementById('d-password').value;
+      if (!account || !password) return alert('请输入账号和密码');
+      const ok = await doLogin(account, password, 'doctor');
+      if (ok) { document.getElementById('d-password').value = ''; }
+    }
+
+    async function doctorRegister() {
+      const account = document.getElementById('d-r-account').value.trim();
+      const password = document.getElementById('d-r-password').value;
+      const name = document.getElementById('d-r-name').value.trim();
+      if (!account) return alert('请输入账号');
+      if (password.length < 6) return alert('密码至少 6 位');
+      const ok = await doRegister(account, password, name, 'doctor');
+      if (ok) {
+        document.getElementById('d-r-account').value = '';
+        document.getElementById('d-r-password').value = '';
+        document.getElementById('d-r-name').value = '';
+      }
+    }
+
+    function doctorLogout() {
+      doctorToken = null; doctorId = '';
+      localStorage.removeItem('doctor_token');
+      localStorage.removeItem('doctor_id');
+      lastPendingSig = '';
+      lastSessionsSig = '';
+      doctorSessions = [];
+      selectedPatient = '';
+      renderDoctorState();
+    }
+
+    // ── 通用认证请求 ──
+    async function doLogin(account, password, expectRole) {
+      try {
+        const resp = await fetch(API + '/api/v1/auth/login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ patient_id: account, password })
+        });
+        const data = await resp.json();
+        if (!resp.ok) { alert('登录失败：' + (data.detail || '账号或密码错误')); return false; }
+        if (expectRole === 'patient') {
+          patientToken = data.access_token;
+          patientId = data.patient_id;
+          localStorage.setItem('patient_token', patientToken);
+          localStorage.setItem('patient_id', patientId);
+          renderPatientState();
+        } else {
+          doctorToken = data.access_token;
+          doctorId = data.patient_id;
+          localStorage.setItem('doctor_token', doctorToken);
+          localStorage.setItem('doctor_id', doctorId);
+          renderDoctorState();
+        }
+        return true;
+      } catch (e) { alert('请求失败，请确认后端已启动。'); return false; }
+    }
+
+    async function doRegister(account, password, name, role) {
+      try {
+        const resp = await fetch(API + '/api/v1/auth/register', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ patient_id: account, password, name, role })
+        });
+        const data = await resp.json();
+        if (!resp.ok) { alert('注册失败：' + (data.detail || '账号已存在')); return false; }
+        // 注册即登录：写入对应角色的登录态
+        if (role === 'patient') {
+          patientToken = data.access_token;
+          patientId = data.patient_id;
+          localStorage.setItem('patient_token', patientToken);
+          localStorage.setItem('patient_id', patientId);
+          renderPatientState();
+        } else {
+          doctorToken = data.access_token;
+          doctorId = data.patient_id;
+          localStorage.setItem('doctor_token', doctorToken);
+          localStorage.setItem('doctor_id', doctorId);
+          renderDoctorState();
+        }
+        return true;
+      } catch (e) { alert('请求失败，请确认后端已启动。'); return false; }
+    }
+
+    // ── 咨询问答（SSE 流式，气泡渲染）──
+    async function sendChat() {
+      const input = document.getElementById('qa-question');
+      const q = input.value.trim();
+      if (!q) return alert('请输入问题');
+      if (!patientToken) return alert('请先登录');
+      input.value = '';
+      addMsg('patient', q);
+      const out = addMsg('assistant', '思考中…');
+      const unified = document.getElementById('qa-unified').checked;
+      let tokens = '', sources = [], interrupted = false;
+      try {
+        const resp = await fetch(API + (unified ? '/api/v1/chat/unified/stream' : '/api/v1/chat/stream'), {
+          method: 'POST', headers: authHeader(patientToken),
+          body: JSON.stringify(unified ? { message: q } : { mode: 'qa', question: q })
+        });
+        if (resp.status === 401) { patientLogout(); return alert('登录已失效，请重新登录。'); }
+        if (!resp.ok) { const d = await resp.json().catch(() => ({})); updateMsg(out, '出错了：' + (d.detail || resp.status)); return; }
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buf = '';
+        const handleLine = (line) => {
+          if (!line.startsWith('data:')) return;
+          let ev; try { ev = JSON.parse(line.slice(5).trim()); } catch (e) { return; }
+          if (ev.type === 'status') {
+            updateMsg(out, ev.content);
+          } else if (ev.type === 'guidance') {
+            updateMsg(out, ev.content);
+          } else if (ev.type === 'queued_to_doctor') {
+            updateMsg(out, ev.message || '已发送给医生，等待回复…');
+            startHumanPolling();
+          } else if (ev.type === 'meta') {
+            sources = ev.sources || [];
+          } else if (ev.type === 'token') {
+            tokens += ev.content;
+            updateMsg(out, tokens);
+          } else if (ev.type === 'interrupted') {
+            interrupted = true;
+            updateMsg(out, `该问题因${ev.reason || '低置信度/高危'}已转人工，正在等待医生介入…`);
+            awaitingHuman = true;
+            startHumanPolling();
+          }
+        };
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let nl;
+          while ((nl = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, nl).replace(/\r$/, '');
+            buf = buf.slice(nl + 1);
+            handleLine(line);
+          }
+        }
+        if (buf) handleLine(buf.replace(/\r$/, ''));
+
+        if (!interrupted && !tokens) {
+          const t = out.querySelector('.msg-text');
+          if (t && t.textContent === '思考中…') updateMsg(out, '（未获得回答）');
+        } else if (!interrupted && sources.length) {
+          updateMsg(out, tokens + '\n\n来源：' + sources.join('、'));
+        }
+      } catch (e) { updateMsg(out, '请求失败，请确认后端已启动。'); }
+    }
+
+    // ── 记录血糖 ──
+    async function sendGlucose() {
+      const value = parseFloat(document.getElementById('glu-value').value);
+      const measurement_type = document.getElementById('glu-type').value;
+      if (isNaN(value)) return alert('请输入有效血糖值');
+      if (!patientToken) return alert('请先登录');
+      const box = document.getElementById('glu-result');
+      box.innerHTML = '处理中…';
+      try {
+        const resp = await fetch(API + '/api/v1/glucose', {
+          method: 'POST', headers: authHeader(patientToken),
+          body: JSON.stringify({ mode: 'glucose', value, measurement_type })
+        });
+        const data = await resp.json();
+        if (resp.status === 401) { patientLogout(); return alert('登录已失效，请重新登录。'); }
+        const a = data.alert_level;
+        const cls = a === 'normal' ? 'ok' : (a === 'low' ? 'danger' : 'warn');
+        box.innerHTML = tag(cls, '告警级别：' + a) + '\n' + data.interpretation + '\n建议：' + data.advice;
+      } catch (e) { box.innerHTML = tag('danger', '错误') + ' 请求失败，请确认后端已启动。'; }
+    }
+
+    // ── 我的病历：上传 / 列表 / 删除 ──
+    async function uploadDoc() {
+      if (!patientToken) return alert('请先登录');
+      const docType = document.getElementById('doc-type').value;
+      const title = document.getElementById('doc-title').value.trim();
+      const text = document.getElementById('doc-text').value;
+      const fileInput = document.getElementById('doc-file');
+      const file = fileInput.files[0];
+      if (!file && !text.trim()) return alert('请选择文件或粘贴文本');
+      const box = document.getElementById('doc-result');
+      box.innerHTML = '上传中…';
+      const form = new FormData();
+      form.append('doc_type', docType);
+      form.append('title', title);
+      form.append('text', text);
+      if (file) form.append('file', file);
+      try {
+        const resp = await fetch(API + '/api/v1/documents', {
+          method: 'POST', headers: { 'Authorization': 'Bearer ' + patientToken }, body: form
+        });
+        const data = await resp.json();
+        if (resp.status === 401) { patientLogout(); return alert('登录已失效，请重新登录。'); }
+        if (!resp.ok) { box.innerHTML = tag('danger', '错误') + ' ' + (data.detail || '上传失败'); return; }
+        box.innerHTML = tag('ok', '上传成功') + ' 已保存「' + data.doc_type_label + '」，共 ' + data.char_count + ' 字，切分 ' + data.chunk_count + ' 块。';
+        fileInput.value = ''; document.getElementById('doc-text').value = ''; document.getElementById('doc-title').value = '';
+        loadDocs();
+      } catch (e) { box.innerHTML = tag('danger', '错误') + ' 请求失败，请确认后端已启动。'; }
+    }
+
+    async function loadDocs() {
+      if (!patientToken) return;
+      const box = document.getElementById('doc-list');
+      box.innerHTML = '加载中…';
+      try {
+        const resp = await fetch(API + '/api/v1/documents', { headers: { 'Authorization': 'Bearer ' + patientToken } });
+        const data = await resp.json();
+        if (resp.status === 401) { patientLogout(); return alert('登录已失效，请重新登录。'); }
+        const list = data.documents || [];
+        if (!list.length) { box.innerHTML = '<div class="muted">暂无文档，点击上方上传病例或出院小结。</div>'; return; }
+        box.innerHTML = list.map(d => `
+          <div class="pending-item">
+            <div class="q">${d.title} <span class="tag info">${d.doc_type_label}</span></div>
+            <div class="muted">${d.char_count} 字 · ${(d.created_at || '').slice(0, 10)}</div>
+            <button class="danger" onclick="deleteDoc(${d.id})">删除</button>
+          </div>`).join('');
+      } catch (e) { box.innerHTML = '<div class="muted">加载失败。</div>'; }
+    }
+
+    async function deleteDoc(id) {
+      if (!patientToken || !confirm('确定删除该文档？')) return;
+      const resp = await fetch(API + '/api/v1/documents/' + id, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + patientToken } });
+      const data = await resp.json();
+      if (resp.status === 401) { patientLogout(); return alert('登录已失效，请重新登录。'); }
+      if (!resp.ok) return alert('删除失败：' + (data.detail || '请重试'));
+      loadDocs();
+    }
+
+    // ── 医生端：待人工介入 ──
+    let lastPendingSig = '';
+
+    async function refreshPending() {
+      if (!doctorToken) return;
+      const box = document.getElementById('pending-list');
+      try {
+        const resp = await fetch(API + '/api/v1/hitl/pending', { headers: authHeader(doctorToken) });
+        const data = await resp.json();
+        if (resp.status === 401) { doctorLogout(); return alert('登录已失效，请重新登录。'); }
+        const list = data.pending || [];
+        const sig = JSON.stringify(list);
+        if (sig === lastPendingSig) return;   // 内容未变不重绘，避免闪烁与打断输入
+        lastPendingSig = sig;
+        const drafts = collectDrafts(box);
+        if (!list.length) { box.innerHTML = '<div class="muted">当前无待处理。</div>'; return; }
+        box.innerHTML = list.map(p => `
+          <div class="pending-item">
+            <div class="q">${escapeHtml(p.question)}</div>
+            <div class="muted">thread_id: ${p.thread_id}</div>
+            <textarea id="note-${p.thread_id}" rows="2" placeholder="医生补充意见"></textarea>
+            <button onclick="resume('${p.thread_id}')">提交并恢复</button>
+          </div>`).join('');
+        applyDrafts(box, drafts);
+      } catch (e) { /* 网络抖动忽略 */ }
+    }
+
+    async function resume(thread_id) {
+      if (!doctorToken) return alert('请先登录医生账号');
+      const doctor_note = document.getElementById('note-' + thread_id).value.trim();
+      const resp = await fetch(API + '/api/v1/hitl/resume', {
+        method: 'POST', headers: authHeader(doctorToken),
+        body: JSON.stringify({ thread_id, action: 'override', doctor_note })
+      });
+      const data = await resp.json();
+      if (!resp.ok) return alert('恢复失败：' + (data.detail || '请重试'));
+      alert('已恢复，回答：\n' + (data.answer || ''));
+      lastPendingSig = '';
+      refreshPending();
+      lastSessionsSig = '';
+      refreshSessions();
+    }
+
+    // ── 医生端：进行中的人工会话（对话窗 + 回复）──
+    let lastSessionsSig = '';
+    let doctorSessions = [];
+    let selectedPatient = '';
+
+    async function refreshSessions() {
+      if (!doctorToken) return;
+      try {
+        const resp = await fetch(API + '/api/v1/hitl/sessions', { headers: authHeader(doctorToken) });
+        if (resp.status === 401) { doctorLogout(); return; }
+        if (!resp.ok) return;
+        const list = (await resp.json()).sessions || [];
+        const sig = JSON.stringify(list);
+        if (sig === lastSessionsSig) return;   // 内容未变不重绘，避免打断输入
+        lastSessionsSig = sig;
+        doctorSessions = list;
+        if (!list.find(s => s.patient_id === selectedPatient)) {
+          selectedPatient = list.length ? list[0].patient_id : '';
+        }
+        renderSessionChips();
+        renderDoctorConvo();
+      } catch (e) { /* 网络抖动忽略 */ }
+    }
+
+    function renderSessionChips() {
+      const box = document.getElementById('session-chips');
+      if (!doctorSessions.length) { box.innerHTML = '<span class="muted">当前无进行中的会话</span>'; return; }
+      box.innerHTML = doctorSessions.map(s =>
+        `<span class="chip ${s.patient_id === selectedPatient ? 'active' : ''}" onclick="selectSession('${s.patient_id}')">${escapeHtml(s.patient_id)}</span>`
+      ).join('');
+    }
+
+    function renderDoctorConvo() {
+      const box = document.getElementById('doctor-convo');
+      const replyBox = document.getElementById('doctor-reply-box');
+      const s = doctorSessions.find(x => x.patient_id === selectedPatient);
+      if (!s) { box.innerHTML = '<div class="muted">选择上方会话查看对话</div>'; replyBox.style.display = 'none'; return; }
+      replyBox.style.display = '';
+      box.innerHTML = (s.messages || []).map(bubbleHtmlDoc).join('') || '<div class="muted">暂无消息</div>';
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function selectSession(pid) {
+      selectedPatient = pid;
+      document.getElementById('doctor-reply').value = '';
+      renderSessionChips();
+      renderDoctorConvo();
+    }
+
+    async function sessionReply() {
+      if (!doctorToken) return alert('请先登录医生账号');
+      if (!selectedPatient) return alert('请先选择会话');
+      const ta = document.getElementById('doctor-reply');
+      const content = ta.value.trim();
+      if (!content) return alert('请输入回复内容');
+      const resp = await fetch(API + '/api/v1/hitl/session/reply', {
+        method: 'POST', headers: authHeader(doctorToken),
+        body: JSON.stringify({ patient_id: selectedPatient, content })
+      });
+      const data = await resp.json();
+      if (!resp.ok) return alert('回复失败：' + (data.detail || '请重试'));
+      ta.value = '';
+      lastSessionsSig = '';
+      refreshSessions();
+    }
+
+    async function closeSession() {
+      if (!doctorToken) return alert('请先登录医生账号');
+      if (!selectedPatient) return alert('请先选择会话');
+      if (!confirm('确定结束该患者的诊断？结束后将恢复 AI 问答。')) return;
+      const resp = await fetch(API + '/api/v1/hitl/session/close', {
+        method: 'POST', headers: authHeader(doctorToken),
+        body: JSON.stringify({ patient_id: selectedPatient })
+      });
+      const data = await resp.json();
+      if (!resp.ok) return alert('结束失败：' + (data.detail || '请重试'));
+      lastSessionsSig = '';
+      refreshSessions();
+    }
+
+    // 输入框：回车发送，Shift+回车换行
+    document.getElementById('qa-question').addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+    });
+
+    // 页面加载时恢复登录态
+    renderPatientState();
+    renderDoctorState();
+  </script>
+</body>
+</html>
