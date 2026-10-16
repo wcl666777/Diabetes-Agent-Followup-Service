@@ -7,6 +7,7 @@ API 文档：http://localhost:8000/docs
 """
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -79,12 +80,22 @@ app.include_router(patient_docs.router)
 app.include_router(unified_chat.router)
 
 # 静态前端
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# 用绝对路径定位 static，避免因启动目录不同而报 Directory 'static' does not exist
+_STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 
 @app.get("/", include_in_schema=False)
 async def index():
-    return FileResponse("static/index.html")
+    # 禁止浏览器缓存页面：前端随版本迭代，缓存会导致用户看到旧版页面（改了不生效）
+    return FileResponse(
+        str(_STATIC_DIR / "index.html"),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @app.get("/health", tags=["系统"])

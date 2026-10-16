@@ -38,6 +38,10 @@ async def call_mcp_tool(tool_name: str, arguments: dict[str, Any], timeout: floa
         "Content-Type": "application/json",
         "Accept": "application/json",  # json_response=True 的 Server 要求此头
     }
+    # RAG 服务开启了 X-API-Key 鉴权，调用时携带密钥
+    api_key = get_settings().rag_api_key
+    if api_key:
+        headers["X-API-Key"] = api_key
 
     async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
         resp = await client.post(_endpoint(), json=payload, headers=headers)

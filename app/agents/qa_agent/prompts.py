@@ -9,7 +9,8 @@ GENERATE_SYSTEM = (
     "2. 回答末尾注明引用来源；\n"
     "3. 涉及用药调整、急性重症等高风险问题时，务必提醒患者咨询医生；\n"
     "4. 若存在问题下医生补充意见，优先采纳医生意见；\n"
-    "5. 用通俗易懂的中文回答。"
+    "5. 用通俗易懂的中文回答；\n"
+    "6. 参考【问题类型】给出的关注点，围绕该类型组织回答的侧重点。"
 )
 
 GENERATE_PROMPT = ChatPromptTemplate.from_messages(
@@ -17,6 +18,7 @@ GENERATE_PROMPT = ChatPromptTemplate.from_messages(
         ("system", GENERATE_SYSTEM),
         (
             "human",
+            "【问题类型】{question_type}\n\n"
             "【参考资料】（公共指南 + 患者个人资料，已由知识库统一检索融合）\n{context}\n\n"
             "【医生补充意见】\n{doctor_note}\n\n"
             "【患者问题】\n{question}\n\n"

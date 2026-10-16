@@ -14,6 +14,7 @@ class QAState(TypedDict):
     session_id: str
     question: str
     force_human: bool                  # 患者主动要求人工：跳过检索直接转人工
+    retrieval_precomputed: bool        # 上游接口已完成检索并注入结果：节点不再重复检索
 
     # ③ 检索结果（retrieve 节点填充）
     confidence: float                  # 精排置信度
@@ -33,3 +34,4 @@ class QAState(TypedDict):
     answer: str
     sources: list[str]
     answer_mode: str                   # "rag"（AI 生成）/ "human"（医生直接回答）
+    question_type: str                 # 细粒度问题类型：用药 / 饮食 / 血糖监测 / 并发症 / 生活方式 / 就医指导 / 综合咨询

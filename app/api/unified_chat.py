@@ -2,13 +2,14 @@
 
 对用户一句话，自动判断该交给哪个 Agent，并以 SSE 流式返回。流程：
   ① 规则前置拦截：问候 / 感谢 / 道别 / 身份 / 功能咨询 —— 零 Token 直接模板回复；
-  ② LLM 意图路由：返回 label ∈ {qa, glucose, clarify}；
+  ② 意图路由（三层：规则 → LLM 结构化分类 → 兜底，见 core/intent_router.py）：返回 label ∈ {qa, glucose, clarify}；
   ③ 分发：
-       qa       → 走问答 Agent（检索 → 流式生成 / 必要时转人工）
+       qa       → 编排两步：先跑「意图识别 Agent」（识别饮食 / 运动 / 用药…），
+                  再把识别结果喂给问答 Agent（检索 → 流式生成 / 必要时转人工）
        glucose  → 返回引导卡片，提示到「记录血糖」页签填写
        clarify  → 追问澄清
 
-SSE 事件：routing_decision / token / meta / guidance / done / error
+SSE 事件：routing_decision / status / token / meta / guidance / done / error
 """
 import asyncio
 import json
@@ -21,15 +22,22 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from app.agents.qa_agent.graph import build_qa_graph
-from app.agents.qa_agent.nodes import need_human, retrieve, stream_answer, wants_human
+from app.agents.qa_agent.nodes import (
+    need_human,
+    retrieve,
+    stream_answer,
+    wants_human,
+)
 from app.agents.qa_agent.prompts import GENERATE_PROMPT
 from app.core.auth import get_current_patient
 from app.core.history import save_turn
-from app.core.llm_factory import get_llm
+from app.core.intent_router import route_intent
 from app.core.logger import get_logger
 from app.core.memory import build_thread_id
 from app.core.models import PatientProfile
+from app.core.orchestrator import get_orchestrator
 from app.core.qa_flow import force_human_interrupt
+from app.core.question_types import classify_question_type
 from app.core.tracking import get_result, track_pending
 from app.core import human_session
 
@@ -64,37 +72,7 @@ def _pre_filter(text: str) -> str:
     return ""
 
 
-# ── ② LLM 意图路由 ──
-_ROUTE_PROMPT = """你是随访助手的意图路由器。请判断用户消息属于哪一类，只返回 JSON，不要多余内容。
-
-可选 label：
-- "qa"：医疗健康咨询（症状、用药、饮食、血糖指标解读、并发症等）
-- "glucose"：用户想记录/上报一次血糖数值
-- "clarify"：意图不明确，需要向用户追问
-
-用户消息：{message}
-
-返回格式：{{"label": "qa", "reason": "简短理由"}}"""
-
-
-def _llm_route(message: str) -> tuple[str, str]:
-    """LLM 意图路由，失败回退 qa（最安全，交给问答 Agent）。"""
-    try:
-        llm = get_llm("intent", temperature=0)
-        resp = llm.invoke(_ROUTE_PROMPT.format(message=message))
-        text = resp.content if isinstance(resp.content, str) else str(resp.content)
-        m = re.search(r'"label"\s*:\s*"(\w+)"', text)
-        r = re.search(r'"reason"\s*:\s*"([^"]*)"', text)
-        label = m.group(1) if m else "qa"
-        reason = r.group(1) if r else ""
-        if label not in ("qa", "glucose", "clarify"):
-            label = "qa"
-        return label, reason
-    except Exception as e:
-        logger.warning("unified.route_failed | error=%s", e)
-        return "qa", "路由失败回退问答"
-
-
+# ── ② 意图路由（三层：规则 → LLM 结构化分类 → 兜底，见 core/intent_router.py）──
 _LABEL_DISPLAY = {"qa": "问答助手", "glucose": "血糖管理", "clarify": "意图澄清"}
 
 
@@ -103,7 +81,15 @@ def _sse(payload: dict) -> dict:
 
 
 async def _stream_qa(patient_id: str, session_id: str, question: str):
-    """问答分支的流式生成（与 /chat/stream 同源逻辑）。"""
+    """问答分支的流式生成（与 /chat/stream 同源逻辑）。
+
+    编排：先跑「意图识别 Agent」拿到问题类型，再交给问答 Agent 生成（两步串联）。
+    """
+    # ⓪ 编排第一步：意图识别 Agent（识别饮食 / 运动 / 用药…），结果喂给问答 Agent
+    yield _sse({"type": "status", "content": "正在理解问题…"})
+    intent = await get_orchestrator().run_intent(patient_id, session_id, question)
+    question_type = intent.get("question_type") or classify_question_type(question)
+
     yield _sse({"type": "status", "content": "正在检索知识库…"})
     r = await retrieve(patient_id, question)
     confidence = r["confidence"]
@@ -114,16 +100,17 @@ async def _stream_qa(patient_id: str, session_id: str, question: str):
         thread_id = build_thread_id(patient_id, session_id)
         config = {"configurable": {"thread_id": thread_id}}
         graph = build_qa_graph()
-        result = await graph.ainvoke(
-            {
-                "messages": [HumanMessage(content=question)],
-                "patient_id": patient_id,
-                "session_id": session_id,
-                "question": question,
-                "confidence": 0.0,
-            },
-            config=config,
-        )
+        # 复用上面已完成的检索结果，避免节点内二次检索，并保证路由与本次判定一致
+        initial_state = {
+            "messages": [HumanMessage(content=question)],
+            "patient_id": patient_id,
+            "session_id": session_id,
+            "question": question,
+            "retrieval_precomputed": True,
+            "question_type": question_type,
+            **r,
+        }
+        result = await graph.ainvoke(initial_state, config=config)
         payload = result.get("__interrupt__")
         reason = "高危问题或检索置信度不足"
         if payload:
@@ -144,6 +131,7 @@ async def _stream_qa(patient_id: str, session_id: str, question: str):
             "sources": [],
             "query_category": category,
             "strategy": r["strategy"],
+            "question_type": question_type,
         })
         yield _sse({"type": "token", "content": r["faq_answer"]})
         try:
@@ -161,9 +149,11 @@ async def _stream_qa(patient_id: str, session_id: str, question: str):
         "sources": r["sources"],
         "query_category": category,
         "strategy": r["strategy"],
+        "question_type": question_type,
     })
 
     prompt = GENERATE_PROMPT.format_messages(
+        question_type=question_type,
         context=r["context"] or "（未检索到相关资料）",
         doctor_note="（无）",
         question=question,
@@ -206,14 +196,17 @@ async def unified_stream(req: UnifiedChatRequest, patient: PatientProfile = Depe
             yield _sse({"type": "done", "session_id": session_id})
             return
 
-        # ② LLM 路由（放线程池避免阻塞事件循环）
+        # ② 意图路由（三层，放线程池避免阻塞事件循环）
         loop = asyncio.get_running_loop()
-        label, reason = await loop.run_in_executor(None, _llm_route, message)
+        decision = await loop.run_in_executor(None, route_intent, message)
+        label = decision.label
         yield _sse({
             "type": "routing_decision",
             "label": label,
             "agent": _LABEL_DISPLAY.get(label, label),
-            "reason": reason,
+            "reason": decision.reason,
+            "confidence": decision.confidence,
+            "source": decision.source,
         })
 
         # ③ 分发

@@ -16,12 +16,18 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from app.agents.qa_agent.graph import build_qa_graph
-from app.agents.qa_agent.nodes import need_human, retrieve, stream_answer, wants_human
+from app.agents.qa_agent.nodes import (
+    need_human,
+    retrieve,
+    stream_answer,
+    wants_human,
+)
 from app.agents.qa_agent.prompts import GENERATE_PROMPT
 from app.core.auth import get_current_patient
 from app.core.history import save_turn
 from app.core.memory import build_thread_id
 from app.core.models import PatientProfile
+from app.core.orchestrator import get_orchestrator
 from app.core.qa_flow import force_human_interrupt
 from app.core.tracking import remove_pending, track_pending
 from app.core import human_session
@@ -83,6 +89,9 @@ async def chat(req: ChatRequest, patient: PatientProfile = Depends(get_current_p
     thread_id = build_thread_id(patient_id, session_id)
     config = {"configurable": {"thread_id": thread_id}}
 
+    # 编排第一步：意图识别 Agent（识别饮食 / 运动 / 用药…），结果喂给问答 Agent
+    intent = await get_orchestrator().run_intent(patient_id, session_id, req.question)
+
     graph = build_qa_graph()
     initial_state = {
         "messages": [HumanMessage(content=req.question)],
@@ -90,6 +99,7 @@ async def chat(req: ChatRequest, patient: PatientProfile = Depends(get_current_p
         "session_id": session_id,
         "question": req.question,
         "confidence": 0.0,
+        "question_type": intent.get("question_type", ""),
     }
 
     result = await graph.ainvoke(initial_state, config=config)
@@ -162,28 +172,35 @@ async def chat_stream(req: ChatRequest, patient: PatientProfile = Depends(get_cu
             yield _sse({"type": "interrupted", "thread_id": tid, "reason": reason})
             return
 
-        # ② 检索 + 路由判断（先告知前端，避免干等）
+        # ② 编排第一步：意图识别 Agent（识别饮食 / 运动 / 用药…，先告知前端）
+        yield _sse({"type": "status", "content": "正在理解问题…"})
+        intent = await get_orchestrator().run_intent(patient_id, session_id, question)
+        question_type = intent.get("question_type", "")
+
+        # ③ 检索 + 路由判断（先告知前端，避免干等）
         yield _sse({"type": "status", "content": "正在检索知识库…"})
         r = await retrieve(patient_id, question)
         confidence = r["confidence"]
         category = r["query_category"]
 
-        # ② 转人工：走完整 LangGraph 图拿到 interrupt（保留医生 resume 能力）
+        # ④ 转人工：走完整 LangGraph 图拿到 interrupt（保留医生 resume 能力）
         # 通用知识为日常交流，不因无命中而转人工
         if category != "通用知识" and need_human(confidence, r["is_high_risk"]):
             thread_id = build_thread_id(patient_id, session_id)
             config = {"configurable": {"thread_id": thread_id}}
             graph = build_qa_graph()
-            result = await graph.ainvoke(
-                {
-                    "messages": [HumanMessage(content=question)],
-                    "patient_id": patient_id,
-                    "session_id": session_id,
-                    "question": question,
-                    "confidence": 0.0,
-                },
-                config=config,
-            )
+            # 复用上面已完成的检索结果，并标记 retrieval_precomputed，
+            # 既避免节点内二次检索，又保证路由与本次判定一致（不会「假转人工」）
+            initial_state = {
+                "messages": [HumanMessage(content=question)],
+                "patient_id": patient_id,
+                "session_id": session_id,
+                "question": question,
+                "retrieval_precomputed": True,
+                "question_type": question_type,
+                **r,
+            }
+            result = await graph.ainvoke(initial_state, config=config)
             interrupt_payload = result.get("__interrupt__")
             payload = _unwrap_interrupt(interrupt_payload) if interrupt_payload else {"message": "已转人工"}
             await track_pending(thread_id, patient_id, session_id, question, payload)
@@ -194,7 +211,7 @@ async def chat_stream(req: ChatRequest, patient: PatientProfile = Depends(get_cu
             })
             return
 
-        # ③ 快车道命中：直接输出标准答案（无需大模型生成）
+        # ⑤ 快车道命中：直接输出标准答案（无需大模型生成）
         if r["source"] == "faq":
             yield _sse({
                 "type": "meta",
@@ -203,13 +220,14 @@ async def chat_stream(req: ChatRequest, patient: PatientProfile = Depends(get_cu
                 "sources": [],
                 "query_category": category,
                 "strategy": r["strategy"],
+                "question_type": question_type,
             })
             yield _sse({"type": "token", "content": r["faq_answer"]})
             await _persist_turn(patient_id, session_id, req.mode, question, r["faq_answer"])
             yield _sse({"type": "done"})
             return
 
-        # ④ 正常：流式生成（context 为 RAG 侧已融合好的参考资料）
+        # ⑥ 正常：流式生成（context 为 RAG 侧已融合好的参考资料）
         yield _sse({
             "type": "meta",
             "source": r["source"],
@@ -217,9 +235,11 @@ async def chat_stream(req: ChatRequest, patient: PatientProfile = Depends(get_cu
             "sources": r["sources"],
             "query_category": category,
             "strategy": r["strategy"],
+            "question_type": question_type,
         })
 
         prompt = GENERATE_PROMPT.format_messages(
+            question_type=question_type or "综合咨询",
             context=r["context"] or "（未检索到相关资料）",
             doctor_note="（无）",
             question=question,

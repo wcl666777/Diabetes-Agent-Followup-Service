@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.core import mcp_client
 from app.core.llm_factory import get_llm
 from app.core.logger import get_logger
+from app.core.question_types import classify_question_type
 
 logger = get_logger(__name__)
 
@@ -37,6 +38,12 @@ _HUMAN_REQUEST_KEYWORDS = [
 def wants_human(question: str) -> bool:
     """患者是否明确要求人工接入。"""
     return any(kw in question for kw in _HUMAN_REQUEST_KEYWORDS)
+
+
+# 细粒度问题类型（饮食 / 运动 / 用药…）：由「意图识别 Agent」在主流程前识别，
+# 结果通过 state["question_type"] 传入。此处仅保留规则兜底（意图 Agent 未跑或降级时使用）。
+# 与 RAG 侧「通用知识 / 专业咨询」二分类互补：RAG 决定要不要检索、走哪种检索策略，
+# 问题类型决定生成时的答题侧重，二者互不重叠。
 
 
 async def _get_discharge_summary(patient_id: str) -> str:
@@ -118,6 +125,9 @@ async def retrieve_node(state: QAState) -> dict:
             "query_category": "专业咨询", "strategy": "", "context": "",
             "source": "none", "faq_answer": "", "sources": [],
         }
+    if state.get("retrieval_precomputed"):
+        # 上游接口已检索并注入结果（用于转人工前的判定），直接复用，避免二次检索
+        return {}
     return await retrieve(state["patient_id"], state["question"])
 
 
@@ -196,7 +206,10 @@ async def generate_node(state: QAState) -> dict:
         answer = state["faq_answer"]
         return {"answer": answer, "sources": [], "messages": [AIMessage(content=answer)]}
 
+    # 问题类型优先取「意图识别 Agent」的识别结果；缺失时退回规则分类
+    question_type = state.get("question_type") or classify_question_type(state["question"])
     prompt = GENERATE_PROMPT.format_messages(
+        question_type=question_type,
         context=state.get("context") or "（未检索到相关资料）",
         doctor_note=state.get("doctor_note") or "（无）",
         question=state["question"],
@@ -209,5 +222,6 @@ async def generate_node(state: QAState) -> dict:
     return {
         "answer": answer,
         "sources": state.get("sources", []),
+        "question_type": question_type,
         "messages": [AIMessage(content=answer)],
     }

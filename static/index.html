@@ -160,6 +160,17 @@
     .tag.ok { background:var(--ok); } .tag.warn { background:var(--warn); }
     .tag.danger { background:var(--danger); } .tag.info { background:var(--primary); }
 
+    /* ── 系统决策信息条：路由 / 意图类型 / 分类 / 检索策略 / 置信度 ── */
+    .msg-meta { display:block; margin:0 0 8px; }
+    .msg-meta:empty { display:none; }
+    .chip {
+      display:inline-block; padding:2px 8px; border-radius:6px; font-size:11.5px;
+      margin:0 6px 4px 0; white-space:nowrap; font-weight:500;
+      background:#eef2ff; color:var(--primary-700); border:1px solid #dbe7ff;
+    }
+    .chip.strong { background:var(--primary); color:#fff; border-color:var(--primary); font-weight:600; }
+    .chip.muted { background:#f1f5f9; color:#475569; border-color:var(--border); }
+
     /* ── 待处理 / 文档卡片 ── */
     .pending-item {
       border:1px solid var(--border); border-radius:13px; padding:14px; margin-bottom:11px;
@@ -239,6 +250,15 @@
     .bubble.system {
       align-self:center; max-width:100%; background:transparent; border:0;
       color:var(--muted); font-size:12px; padding:0; text-align:center;
+    }
+    /* 医生端会话视图：医生自己的话靠右（主色），患者的话靠左（灰底） */
+    .doctor-view .bubble.doctor {
+      align-self:flex-end; background:var(--primary); color:#fff;
+      border:0; border-bottom-right-radius:4px; border-bottom-left-radius:12px;
+    }
+    .doctor-view .bubble.patient {
+      align-self:flex-start; background:#f1f5f9; color:var(--text);
+      border:1px solid var(--border); border-bottom-left-radius:4px; border-bottom-right-radius:12px;
     }
     .msg-text { white-space:pre-wrap; }
 
@@ -324,7 +344,7 @@
         <div id="tab-qa">
           <div id="chat-box" class="chat-box"></div>
           <label style="display:flex;align-items:center;gap:8px;font-weight:400;font-size:12.5px;margin-top:12px;color:#64748b">
-            <input type="checkbox" id="qa-unified" style="width:16px;height:16px;flex:0 0 16px;accent-color:var(--primary);margin:0" />
+            <input type="checkbox" id="qa-unified" checked style="width:16px;height:16px;flex:0 0 16px;accent-color:var(--primary);margin:0" />
             智能路由（自动判断该走咨询还是血糖记录）
           </label>
           <div class="chat-input">
@@ -407,7 +427,7 @@
 
         <div class="panel-head" style="margin-bottom:8px"><h2>进行中的会话</h2></div>
         <div id="session-chips" class="chips"><span class="muted">当前无进行中的会话</span></div>
-        <div id="doctor-convo" class="chat-box" style="min-height:200px;max-height:320px"></div>
+        <div id="doctor-convo" class="chat-box doctor-view" style="min-height:200px;max-height:320px"></div>
         <div id="doctor-reply-box" style="display:none">
           <textarea id="doctor-reply" rows="2" placeholder="回复患者…"></textarea>
           <button onclick="sessionReply()">回复患者</button>
@@ -465,7 +485,8 @@
       } else {
         const label = role === 'patient' ? '您' : (role === 'doctor' ? '医生' : '智能助手');
         el.className = 'bubble ' + role;
-        el.innerHTML = `<span class="who-tag">${label}</span><span class="msg-text"></span>`;
+        el.innerHTML = `<span class="who-tag">${label}</span>`
+          + `<span class="msg-meta"></span><span class="msg-text"></span>`;
         el.querySelector('.msg-text').textContent = text;
       }
       box.appendChild(el);
@@ -478,6 +499,27 @@
       t.textContent = text;
       const box = document.getElementById('chat-box');
       if (box) box.scrollTop = box.scrollHeight;
+    }
+
+    // ── 答案来源展示名（后端 source 字段 → 中文）──
+    const SOURCE_LABEL = { faq: '高频快车道', rag: '知识库检索', none: '无命中', human: '医生答复' };
+
+    // ── 渲染"系统决策"信息条：把后端返回的路由/意图/检索信息展示出来 ──
+    function renderMeta(el, info) {
+      const box = el && el.querySelector('.msg-meta');
+      if (!box) return;
+      const chips = [];
+      if (info.agent) chips.push(`<span class="chip strong">路由 · ${escapeHtml(info.agent)}</span>`);
+      if (info.question_type) chips.push(`<span class="chip">意图类型 · ${escapeHtml(info.question_type)}</span>`);
+      if (info.query_category) chips.push(`<span class="chip muted">分类 · ${escapeHtml(info.query_category)}</span>`);
+      if (info.strategy) chips.push(`<span class="chip muted">检索策略 · ${escapeHtml(info.strategy)}</span>`);
+      if (info.source) chips.push(`<span class="chip muted">来源 · ${escapeHtml(SOURCE_LABEL[info.source] || info.source)}</span>`);
+      if (typeof info.confidence === 'number' && info.confidence > 0) {
+        chips.push(`<span class="chip muted">检索置信度 · ${info.confidence.toFixed(2)}</span>`);
+      }
+      box.innerHTML = chips.join('');
+      const boxEl = document.getElementById('chat-box');
+      if (boxEl) boxEl.scrollTop = boxEl.scrollHeight;
     }
 
     // 医生端对话气泡：患者消息标「患者」，医生消息标「医生」
@@ -710,6 +752,7 @@
       const out = addMsg('assistant', '思考中…');
       const unified = document.getElementById('qa-unified').checked;
       let tokens = '', sources = [], interrupted = false;
+      const info = {};   // 系统决策信息（路由 / 意图类型 / 分类 / 检索策略 / 置信度）
       try {
         const resp = await fetch(API + (unified ? '/api/v1/chat/unified/stream' : '/api/v1/chat/stream'), {
           method: 'POST', headers: authHeader(patientToken),
@@ -726,6 +769,9 @@
           let ev; try { ev = JSON.parse(line.slice(5).trim()); } catch (e) { return; }
           if (ev.type === 'status') {
             updateMsg(out, ev.content);
+          } else if (ev.type === 'routing_decision') {
+            info.agent = ev.agent || ev.label || '';
+            renderMeta(out, info);
           } else if (ev.type === 'guidance') {
             updateMsg(out, ev.content);
           } else if (ev.type === 'queued_to_doctor') {
@@ -733,6 +779,13 @@
             startHumanPolling();
           } else if (ev.type === 'meta') {
             sources = ev.sources || [];
+            // 展示元信息：意图类型（意图识别 Agent）/ 分类（RAG 分类器）/ 检索策略 / 来源 / 检索置信度
+            if (ev.question_type) info.question_type = ev.question_type;
+            if (ev.query_category) info.query_category = ev.query_category;
+            if (ev.strategy) info.strategy = ev.strategy;
+            if (ev.source) info.source = ev.source;
+            if (typeof ev.confidence === 'number') info.confidence = ev.confidence;
+            renderMeta(out, info);
           } else if (ev.type === 'token') {
             tokens += ev.content;
             updateMsg(out, tokens);
@@ -760,7 +813,8 @@
           const t = out.querySelector('.msg-text');
           if (t && t.textContent === '思考中…') updateMsg(out, '（未获得回答）');
         } else if (!interrupted && sources.length) {
-          updateMsg(out, tokens + '\n\n来源：' + sources.join('、'));
+          // 去重后再展示：同一份文档可能被多次召回，重复显示看起来像 bug
+          updateMsg(out, tokens + '\n\n来源：' + [...new Set(sources)].join('、'));
         }
       } catch (e) { updateMsg(out, '请求失败，请确认后端已启动。'); }
     }
@@ -864,7 +918,7 @@
             <div class="q">${escapeHtml(p.question)}</div>
             <div class="muted">thread_id: ${p.thread_id}</div>
             <textarea id="note-${p.thread_id}" rows="2" placeholder="医生补充意见"></textarea>
-            <button onclick="resume('${p.thread_id}')">提交并恢复</button>
+            <button onclick="resume('${p.thread_id}')">提交并回复</button>
           </div>`).join('');
         applyDrafts(box, drafts);
       } catch (e) { /* 网络抖动忽略 */ }

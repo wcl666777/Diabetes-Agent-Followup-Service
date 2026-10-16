@@ -4,8 +4,14 @@
 用法：from app.config import get_settings; settings = get_settings()
 """
 from functools import lru_cache
+from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
+
+# 服务根目录（agent_service/）：相对路径以此为基准，
+# 使服务从任意工作目录启动都能正确定位 .env / logs。
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
@@ -13,7 +19,7 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
     log_level: str = "INFO"
-    log_dir: str = "./logs"             # 日志落盘目录（相对服务启动目录）
+    log_dir: str = str(BASE_DIR / "logs")   # 日志落盘目录（相对 agent_service 根目录，与启动目录无关）
 
     # ── 大模型（DeepSeek，OpenAI 兼容）──
     deepseek_api_key: str = ""
@@ -35,6 +41,7 @@ class Settings(BaseSettings):
 
     # ── RAG 服务的 MCP Server 地址（问答 Agent 通过 MCP 调用知识检索）──
     rag_mcp_server_url: str = "http://localhost:8001/rag"
+    rag_api_key: str = ""                  # 调用 RAG 服务所需密钥（随请求头 X-API-Key 发送）
 
     # ── 问答 Agent 转人工阈值 ──
     qa_confidence_threshold: float = 0.5   # 精排置信度低于此值 → 转人工
@@ -47,8 +54,15 @@ class Settings(BaseSettings):
             f"@{self.db_host}:{self.db_port}/{self.db_name}?charset=utf8mb4"
         )
 
+    @field_validator("log_dir", mode="after")
+    @classmethod
+    def _resolve_paths(cls, v: str) -> str:
+        """把相对路径统一解析到 BASE_DIR 下，兼容 .env 中配置的相对路径。"""
+        p = Path(v).expanduser()
+        return str(p if p.is_absolute() else (BASE_DIR / p))
+
     class Config:
-        env_file = ".env"
+        env_file = str(BASE_DIR / ".env")
         env_file_encoding = "utf-8"
         case_sensitive = False
         extra = "ignore"
